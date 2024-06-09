@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,7 +16,10 @@ const maxP = 10
 type Chunk struct {
 	start int
 	end int
+	etag string
 }
+
+var logger = log.New(os.Stderr, "", log.LstdFlags)
 
 
 
@@ -37,7 +42,10 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 	defer resp.Body.Close()
 
 	etag := resp.Header.Get("ETag")
-	println("P_ETag: ", etag)
+	logger.Println("P_ETag: ", etag)
+	if etag != "" && etag != chunk.etag {
+		return errors.New("ETag mismatch")
+	}
 
 	contents, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -45,7 +53,7 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 	}
 
 	if len(contents)-1 != chunk.end - chunk.start {
-		println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
+		logger.Println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
 	}
 
 	n, err := file.Write(contents)
@@ -54,11 +62,21 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 	}
 
 	if n-1 != chunk.end - chunk.start {
-		println("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
+		logger.Println("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
 	}
 
 
 	return nil
+}
+
+func getHeaders(url string) (http.Header, error) {
+	resp, err := http.Head(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return resp.Header, nil
 }
 
 
@@ -67,22 +85,18 @@ func downloadFile(filePath string, url string) error {
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
 	
-	resp, err := http.Head(url)
+	headers, err := getHeaders(url)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-
-	headers := resp.Header
-
 
 	isAcceptRanges := headers.Get("Accept-Ranges") == "bytes"
 	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
 	etag := headers.Get("ETag")
 
-	println("Content-Length: ", length)
-	println("Accept-Ranges: ", isAcceptRanges)
-	println("ETag: ", etag)
+	logger.Println("Content-Length: ", length)
+	logger.Println("Accept-Ranges: ", isAcceptRanges)
+	logger.Println("ETag: ", etag)
 
 
 	// shared client
@@ -97,8 +111,6 @@ func downloadFile(filePath string, url string) error {
 	defer client.CloseIdleConnections()
 
 
-	err = nil
-
 	chunkSize := 1024 * 1024 // 1MB
 
 	toDownloadTracker := make(map[Chunk]bool)
@@ -108,6 +120,7 @@ func downloadFile(filePath string, url string) error {
 		c := Chunk{
 			start: i * chunkSize,
 			end: min((i + 1) * chunkSize - 1, length - 1),
+			etag: etag,
 		}
 		toDownloadTracker[c] = false
 	}
@@ -124,18 +137,19 @@ func downloadFile(filePath string, url string) error {
 				<-sem
 				wg.Done()
 			}()
-			println("Downloading: ", c.start, c.end)
+			logger.Println("Downloading: ", c.start, c.end)
 			file, err := os.Create(
 				filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
 			)
 			if err != nil {
-				println("Error: ", err)
+				logger.Println("Error: ", err)
 			}
 			err = doPartialDownload(client, file, url, c)
 			if err != nil {
-				println("Error: ", err)
+				logger.Println("Error: ", err)
 			}
-			println("Downloaded: ", c.start, c.end)
+			logger.Println("Downloaded: ", c.start, c.end)
+			toDownloadTracker[c] = true
 		}(c)
 	}
 
@@ -175,5 +189,5 @@ func main() {
 		panic(err)
 	}
 
-	println("File downloaded")
+	logger.Println("File downloaded")
 }
