@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -41,27 +42,29 @@ func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk)
 
 	defer resp.Body.Close()
 
-	contents := make([]byte, chunk.end - chunk.start)
-
-	
-
 	etag := resp.Header.Get("ETag")
 	println("ETag: ", etag)
 
-	n, err := resp.Body.Read(contents)
+	contents, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
-	println("Read: ", n)
 
+	if len(contents)-1 != chunk.end - chunk.start {
+		println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
+	}
 
-	// if n != chunk.end - chunk.start {
-	// 	return errors.New("read different bytes than expected")
-	// }
 
 
 	// println("Contents at ", chunk.start, " to ", chunk.end, " : ", string(contents))
-	file.WriteAt(contents, int64(chunk.start))
+	n, err := file.WriteAt(contents, int64(chunk.start))
+	if err != nil {
+		return err
+	}
+
+	if n-1 != chunk.end - chunk.start {
+		println("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
+	}
 
 
 	return nil
@@ -88,6 +91,12 @@ func downloadFile(filePath string, url string) error {
 	println("Content-Length: ", length)
 	println("Accept-Ranges: ", isAcceptRanges)
 	println("ETag: ", etag)
+
+	// write empty file with length
+	if length > 0 {
+		file.Seek(int64(length - 1), 0)
+		file.Write([]byte{0})
+	}
 
 	// shared client
 	client := &http.Client {
