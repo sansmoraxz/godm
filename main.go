@@ -9,25 +9,16 @@ import (
 	"sync"
 )
 
+const maxP = 10
+
 type Chunk struct {
 	start int
 	end int
 }
 
-type File struct {
-	sync.Mutex
-	ptr *os.File
-}
-
-func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
-	f.Lock()
-	defer f.Unlock()
-	return f.ptr.WriteAt(b, off)
-}
 
 
-
-func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk) error {
+func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chunk) error {
 
 	// TODO: handle with gzip compression
 
@@ -57,7 +48,7 @@ func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk)
 		println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
 	}
 
-	n, err := file.WriteAt(contents, int64(chunk.start))
+	n, err := file.Write(contents)
 	if err != nil {
 		return err
 	}
@@ -75,6 +66,7 @@ func downloadFile(filePath string, url string) error {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
+	
 	resp, err := http.Head(url)
 	if err != nil {
 		return err
@@ -83,11 +75,6 @@ func downloadFile(filePath string, url string) error {
 
 	headers := resp.Header
 
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
 
 	isAcceptRanges := headers.Get("Accept-Ranges") == "bytes"
 	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
@@ -97,51 +84,85 @@ func downloadFile(filePath string, url string) error {
 	println("Accept-Ranges: ", isAcceptRanges)
 	println("ETag: ", etag)
 
-	// write empty file with length
-	if length > 0 {
-		file.Seek(int64(length - 1), 0)
-		file.Write([]byte{0})
-	}
 
 	// shared client
 	client := &http.Client {
 		// Timeout: time.Second * 10,
 		Transport: &http.Transport {
 			MaxIdleConns: 0,
-			MaxIdleConnsPerHost: 100,
+			MaxIdleConnsPerHost: maxP*2,
 		},
 	}
 
 	defer client.CloseIdleConnections()
 
-	wg := sync.WaitGroup{}
 
 	err = nil
 
-	for i := 0; i < 5; i++ {
-		// TODO: find better way to divide the chunks
-		chunk := Chunk {
-			start: (i * length)/5,
-			end: ((i+1) * length)/5,
-		}
+	chunkSize := 1024 * 1024 // 1MB
 
+	toDownloadTracker := make(map[Chunk]bool)
+
+	// download in parallel
+	for i := 0; i < length / chunkSize + 1; i++ {
+		c := Chunk{
+			start: i * chunkSize,
+			end: min((i + 1) * chunkSize - 1, length - 1),
+		}
+		toDownloadTracker[c] = false
+	}
+
+	sem := make(chan bool, maxP)
+
+	wg := sync.WaitGroup{}
+
+	for c := range toDownloadTracker {
+		sem <- true
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			err = doPartialDownload(client, &File{ptr: file}, url, chunk)
-		}()
+		go func(c Chunk) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			println("Downloading: ", c.start, c.end)
+			file, err := os.Create(
+				filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
+			)
+			if err != nil {
+				println("Error: ", err)
+			}
+			err = doPartialDownload(client, file, url, c)
+			if err != nil {
+				println("Error: ", err)
+			}
+			println("Downloaded: ", c.start, c.end)
+		}(c)
 	}
 
 	wg.Wait()
 
+	// reassemble the file
+	file, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 
+	for c := range toDownloadTracker {
+		partFile, err := os.Open(
+			filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
+		)
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(file, partFile)
+		if err != nil {
+			return err
+		}
+	}
+
 
 	return nil
-	
-
 }
 
 func main() {
