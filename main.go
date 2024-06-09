@@ -116,6 +116,8 @@ func downloadFile(filePath string, url string) error {
 
 	wg := sync.WaitGroup{}
 
+	err = nil
+
 	for i := 0; i < 5; i++ {
 		// TODO: find better way to divide the chunks
 		chunk := Chunk {
@@ -126,14 +128,15 @@ func downloadFile(filePath string, url string) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := doPartialDownload(client, &File{ptr: file}, url, chunk)
-			if err != nil {
-				panic(err)
-			}
+			err = doPartialDownload(client, &File{ptr: file}, url, chunk)
 		}()
 	}
 
 	wg.Wait()
+
+	if err != nil {
+		return err
+	}
 
 
 	return nil
