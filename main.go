@@ -82,6 +82,9 @@ func downloadFile(filePath string, url string) error {
 	headers := resp.Header
 
 	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
 	defer file.Close()
 
 	isAcceptRanges := headers.Get("Accept-Ranges") == "bytes"
