@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -28,13 +29,15 @@ func (f *File) WriteAt(b []byte, off int64) (n int, err error) {
 
 func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk) error {
 
+	// TODO: handle with gzip compression
+
 	req, _ := http.NewRequest("GET", url, nil)
 
 	req.Header.Set("Range", "bytes=" + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end))
 
 	resp, err := client.Do(req)
 
-	// TODO: status code check for 200 and 206
+	// TODO: status code check esp. for dividing 200 and 206
 
 	if err != nil {
 		return err
@@ -43,7 +46,7 @@ func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk)
 	defer resp.Body.Close()
 
 	etag := resp.Header.Get("ETag")
-	println("ETag: ", etag)
+	println("P_ETag: ", etag)
 
 	contents, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -54,9 +57,6 @@ func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk)
 		println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
 	}
 
-
-
-	// println("Contents at ", chunk.start, " to ", chunk.end, " : ", string(contents))
 	n, err := file.WriteAt(contents, int64(chunk.start))
 	if err != nil {
 		return err
@@ -73,6 +73,8 @@ func doPartialDownload(client *http.Client, file *File, url string, chunk Chunk)
 
 func downloadFile(filePath string, url string) error {
 	// head request to get metadata
+	// Note: the uncompressed payload is considered for Content-Length
+	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
 	resp, err := http.Head(url)
 	if err != nil {
 		return err
@@ -115,6 +117,7 @@ func downloadFile(filePath string, url string) error {
 	wg := sync.WaitGroup{}
 
 	for i := 0; i < 5; i++ {
+		// TODO: find better way to divide the chunks
 		chunk := Chunk {
 			start: (i * length)/5,
 			end: ((i+1) * length)/5,
@@ -139,10 +142,8 @@ func downloadFile(filePath string, url string) error {
 }
 
 func main() {
-	x,_ := strconv.Atoi("-5")
-	println(x)
 	largeFileUrl := "https://raw.githubusercontent.com/json-iterator/test-data/master/large-file.json"
-	fileName := "x.json"
+	fileName := largeFileUrl[strings.LastIndex(largeFileUrl, "/")+1:]
 
 	err := downloadFile(fileName, largeFileUrl)
 
