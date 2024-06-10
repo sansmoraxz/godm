@@ -98,12 +98,14 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 			}
 			defer file.Close()
 			log.Info("Downloading: ", c.start, c.end)
-			err = c.doPartialDownload(client, file, compress)
-			if err != nil {
-				log.Error("Error: ", err)
-			} else {
-				log.Info("Downloaded: ", c.start, c.end)
-				downBar[c.start/chunkSize] = true
+			for !downBar[c.start/chunkSize] {
+				err = c.doPartialDownload(client, file, compress)
+				if err != nil {
+					log.Error("Error for chunk: ", c.start, c.end, err)
+				} else {
+					log.Info("Downloaded: ", c.start, c.end)
+					downBar[c.start/chunkSize] = true
+				}
 			}
 		}(c)
 	}
@@ -112,52 +114,36 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 
 	// reassemble the file
 
-	// intermediate gz file if compress is true
-	var file *os.File
-
+	var reassembledFile *os.File
+	
 	if compress {
-		if file, err = os.Create(filePath + ".gz"); err != nil {
+		// intermediate gzip file if compress is true
+		if reassembledFile, err = os.Create(filePath + ".gz"); err != nil {
 			return err
 		}
+		defer func() {
+			if err = reassembledFile.Close(); err != nil {
+				log.Error("Error: ", err)
+			}
+			if err = os.Remove(filePath + ".gz"); err != nil {
+				log.Error("Error: ", err)
+			}
+		}()
 	} else {
-		if file, err = os.Create(filePath); err != nil {
+		if reassembledFile, err = os.Create(filePath); err != nil {
 			return err
 		}
+		defer reassembledFile.Close()
 	}
 	log.Info("Reassembling file...")
 
-	reassembleFile(file, toDownloadTracker, partFileNameFn)
-	file.Close()
+	reassembleFile(reassembledFile, toDownloadTracker, partFileNameFn)
 
 	log.Info("Reassembled file")
 
-	// unzip for compressed file
-
 	if compress {
-		if fin, err := os.Open(filePath + ".gz"); err != nil {
+		if err = decompressFile(reassembledFile, filePath); err != nil {
 			return err
-		} else {
-			gr, err := gzip.NewReader(fin)
-			if err != nil {
-				return err
-			}
-			log.Info("Decompressing file...")
-			fout, err := os.Create(filePath)
-			if err != nil {
-				return err
-			}
-			if _, err = io.Copy(fout, gr); err != nil {
-				return err
-			}
-			gr.Close()
-			fout.Close()
-			fin.Close()
-
-			if err = os.Remove(filePath + ".gz"); err != nil {
-				log.Error("Error: ", err)
-				return err
-			}
-			log.Info("Decompressed file")
 		}
 	}
 
@@ -166,23 +152,58 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 
 func reassembleFile(mainFile *os.File, chunks map[Chunk]bool, partFileNameFn func(Chunk) string) error {
 	for c := range chunks {
-		partFile, err := os.Open(partFileNameFn(c))
+		err := func(c Chunk) error {
+			partFile, err := os.Open(partFileNameFn(c))
+			defer func() {
+				if err = partFile.Close(); err != nil {
+					log.Error("Error: ", err)
+				}
+				if err = os.Remove(partFileNameFn(c)); err != nil {
+					log.Error("Error: ", err)
+				}
+			}()
 
+			if err != nil {
+				return err
+			}
+
+			if _, err = mainFile.Seek(int64(c.start), 0); err != nil {
+				return err
+			}
+
+			if _, err = io.Copy(mainFile, partFile); err != nil {
+				return err
+			}
+			log.Info("Reassembled: ", c.start, c.end)
+
+
+			return nil
+		}(c)
 		if err != nil {
 			return err
 		}
-
-		if _, err = mainFile.Seek(int64(c.start), 0); err != nil {
-			return err
-		}
-
-		if _, err = io.Copy(mainFile, partFile); err != nil {
-			return err
-		}
-		log.Info("Reassembled: ", c.start, c.end)
-
-		partFile.Close()
-		os.Remove(partFileNameFn(c))
 	}
+	return nil
+}
+
+
+func decompressFile(mainFile *os.File, filePath string) error {
+	mainFile.Seek(0, 0)
+
+	gr, err := gzip.NewReader(mainFile)
+	if err != nil {
+		return err
+	}
+	defer gr.Close()
+	log.Info("Decompressing file...")
+	fout, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer fout.Close()
+	if _, err = io.Copy(fout, gr); err != nil {
+		return err
+	}
+	log.Info("Decompressed file")
 	return nil
 }
