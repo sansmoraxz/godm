@@ -1,16 +1,21 @@
 package godm
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 )
 
-const maxP = 10
+const (
+	maxP = 10
+	chunkSize = 512 * 1024 // 1MB
+)
 
-func DownloadFile(filePath string, url string) error {
+func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
@@ -39,11 +44,26 @@ func DownloadFile(filePath string, url string) error {
 
 	defer client.CloseIdleConnections()
 
-	chunkSize := 512 * 1024 // 1MB
-
 	toDownloadTracker := make(map[Chunk]bool)
-
 	downBar := make([]bool, length/chunkSize+1)
+
+	if displayDownloadBar {
+		go func() {
+			for {
+				// print download bar
+				fmt.Printf("\r[")
+				for i := 0; i < length/chunkSize+1; i++ {
+					if downBar[i] {
+						fmt.Printf("#")
+					} else {
+						fmt.Printf("-")
+					}
+				}
+				fmt.Printf("]")
+				time.Sleep(1 * time.Second)
+			}
+		}()
+	}
 
 	// download in parallel
 	for i := 0; i < length/chunkSize+1; i++ {

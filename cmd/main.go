@@ -4,11 +4,9 @@ import (
 	"os"
 
 	"github.com/sansmoraxz/godm"
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
-var logger *log.Logger
 
 var rootCmd = &cobra.Command{
     Use:   "godm [URL] [output file]",
@@ -18,8 +16,8 @@ var rootCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var fileName = args[1]
 		var largeFileUrl = args[0]
-		if err := godm.DownloadFile(fileName, largeFileUrl); err != nil {
-			log.Println("Error downloading file:", err)
+		if err := godm.DownloadFile(fileName, largeFileUrl, true); err != nil {
+			println("Error downloading file:", err)
 			os.Exit(1)
 		}
 
@@ -30,7 +28,7 @@ func main() {
 	rootCmd.SetVersionTemplate("1.0.0\n")
 
     if err := rootCmd.Execute(); err != nil {
-        log.Println("Error executing command:", err)
+        println("Error executing command:", err)
         os.Exit(1)
     }
 }
