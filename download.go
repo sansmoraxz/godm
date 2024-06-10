@@ -36,6 +36,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
 	etag := headers.Get("ETag")
 
+	log.Info("Downloading: ", url)
 	log.Info("Content-Length: ", length)
 	log.Info("Accept-Ranges: ", isAcceptRanges)
 	log.Info("ETag: ", etag)
@@ -128,6 +129,8 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	reassembleFile(file, toDownloadTracker, partFileNameFn)
 	file.Close()
 
+	log.Info("Reassembled file")
+
 	// unzip for compressed file
 
 	if compress {
@@ -139,6 +142,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 			if err != nil {
 				return err
 			}
+			log.Info("Decompressing file...")
 			fout, err := os.Create(filePath)
 			if err != nil {
 				return err
@@ -148,6 +152,8 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 			}
 			gr.Close()
 			fout.Close()
+
+			log.Info("Decompressed file")
 		}
 	}
 
@@ -169,7 +175,7 @@ func reassembleFile(mainFile *os.File, chunks map[Chunk]bool, partFileNameFn fun
 		if _, err = io.Copy(mainFile, partFile); err != nil {
 			return err
 		}
-		log.Trace("Reassembled: ", c.start, c.end)
+		log.Info("Reassembled: ", c.start, c.end)
 
 		partFile.Close()
 		os.Remove(partFileNameFn(c))
