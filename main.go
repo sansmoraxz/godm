@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -9,19 +10,18 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxP = 10
 
 type Chunk struct {
 	start int
-	end int
-	etag string
+	end   int
+	etag  string
 }
 
-var logger = log.New(os.Stderr, "", log.LstdFlags)
-
-
+var logger *log.Logger
 
 func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chunk) error {
 
@@ -29,7 +29,7 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 
 	req, _ := http.NewRequest("GET", url, nil)
 
-	req.Header.Set("Range", "bytes=" + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end))
+	req.Header.Set("Range", "bytes="+strconv.Itoa(chunk.start)+"-"+strconv.Itoa(chunk.end))
 
 	resp, err := client.Do(req)
 
@@ -52,7 +52,7 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 		return err
 	}
 
-	if len(contents)-1 != chunk.end - chunk.start {
+	if len(contents)-1 != chunk.end-chunk.start {
 		logger.Println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
 	}
 
@@ -61,10 +61,9 @@ func doPartialDownload(client *http.Client, file *os.File, url string, chunk Chu
 		return err
 	}
 
-	if n-1 != chunk.end - chunk.start {
+	if n-1 != chunk.end-chunk.start {
 		logger.Println("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
 	}
-
 
 	return nil
 }
@@ -79,12 +78,11 @@ func getHeaders(url string) (http.Header, error) {
 	return resp.Header, nil
 }
 
-
 func downloadFile(filePath string, url string) error {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
-	
+
 	headers, err := getHeaders(url)
 	if err != nil {
 		return err
@@ -98,36 +96,51 @@ func downloadFile(filePath string, url string) error {
 	logger.Println("Accept-Ranges: ", isAcceptRanges)
 	logger.Println("ETag: ", etag)
 
-
 	// shared client
-	client := &http.Client {
+	client := &http.Client{
 		// Timeout: time.Second * 10,
-		Transport: &http.Transport {
-			MaxIdleConns: 0,
-			MaxIdleConnsPerHost: maxP*2,
+		Transport: &http.Transport{
+			MaxIdleConns:        0,
+			MaxIdleConnsPerHost: maxP * 2,
 		},
 	}
 
 	defer client.CloseIdleConnections()
 
-
 	chunkSize := 1024 * 1024 // 1MB
 
 	toDownloadTracker := make(map[Chunk]bool)
 
+	downBar := make([]bool, length/chunkSize+1)
+
 	// download in parallel
-	for i := 0; i < length / chunkSize + 1; i++ {
+	for i := 0; i < length/chunkSize+1; i++ {
 		c := Chunk{
 			start: i * chunkSize,
-			end: min((i + 1) * chunkSize - 1, length - 1),
-			etag: etag,
+			end:   min((i+1)*chunkSize-1, length-1),
+			etag:  etag,
 		}
 		toDownloadTracker[c] = false
 	}
+	wg := sync.WaitGroup{}
+
+	// progress bar
+	go func() {
+		fmt.Println("Downloading...")
+		for {
+			fmt.Printf("\r")
+			for _, v := range downBar {
+				if v {
+					fmt.Print("X")
+				} else {
+					fmt.Print("-")
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 
 	sem := make(chan bool, maxP)
-
-	wg := sync.WaitGroup{}
 
 	for c := range toDownloadTracker {
 		sem <- true
@@ -149,7 +162,7 @@ func downloadFile(filePath string, url string) error {
 				logger.Println("Error: ", err)
 			}
 			logger.Println("Downloaded: ", c.start, c.end)
-			toDownloadTracker[c] = true
+			downBar[c.start/chunkSize] = true
 		}(c)
 	}
 
@@ -165,6 +178,7 @@ func downloadFile(filePath string, url string) error {
 		partFile, err := os.Open(
 			filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
 		)
+		
 		if err != nil {
 			return err
 		}
@@ -173,8 +187,11 @@ func downloadFile(filePath string, url string) error {
 		if err != nil {
 			return err
 		}
-	}
 
+		partFile.Close()
+		os.Remove(filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part")
+
+	}
 
 	return nil
 }
@@ -183,7 +200,18 @@ func main() {
 	largeFileUrl := "https://raw.githubusercontent.com/json-iterator/test-data/master/large-file.json"
 	fileName := largeFileUrl[strings.LastIndex(largeFileUrl, "/")+1:]
 
-	err := downloadFile(fileName, largeFileUrl)
+	var logFile, err = os.Create(os.TempDir() + "/godm.log")
+	if err != nil {
+		panic(err)
+	}
+	defer logFile.Close()
+
+	logger = log.New(logFile, "godm: ", log.LstdFlags)
+
+	// to disable logger
+	// logger.SetOutput(io.Discard)
+
+	err = downloadFile(fileName, largeFileUrl)
 
 	if err != nil {
 		panic(err)
