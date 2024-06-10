@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -23,7 +24,7 @@ var download = &cobra.Command{
 		}
 
 		if err := godm.DownloadFile(fileName, largeFileUrl, true, compress); err != nil {
-			println("Error downloading file:", err)
+			fmt.Printf("\n\nError downloading file: %v\n", err)
 			os.Exit(1)
 		}
 
