@@ -1,2 +1,6 @@
+.DEFAULT_GOAL := build
+BIN_FILE=godm
+
+
 build:
-	go build -o bin/$(shell basename $(PWD)) .
+	@go build -o bin/ cmd/main.go

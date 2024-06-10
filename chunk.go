@@ -1,4 +1,4 @@
-package main
+package godm
 
 import (
 	"errors"
@@ -35,7 +35,7 @@ func(chunk *Chunk) doPartialDownload(client *http.Client, file *os.File) error {
 	defer resp.Body.Close()
 
 	etag := resp.Header.Get("ETag")
-	logger.Println("P_ETag: ", etag)
+	log.Debug("P_ETag: ", etag)
 	if etag != "" && etag != chunk.etag {
 		return errors.New("ETag mismatch")
 	}
@@ -46,7 +46,7 @@ func(chunk *Chunk) doPartialDownload(client *http.Client, file *os.File) error {
 	}
 
 	if len(contents)-1 != chunk.end-chunk.start {
-		logger.Println("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
+		log.Warn("read different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(len(contents)))
 	}
 
 	n, err := file.Write(contents)
@@ -55,7 +55,7 @@ func(chunk *Chunk) doPartialDownload(client *http.Client, file *os.File) error {
 	}
 
 	if n-1 != chunk.end-chunk.start {
-		logger.Println("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
+		log.Warn("write different bytes than expected at " + strconv.Itoa(chunk.start) + "-" + strconv.Itoa(chunk.end) + " : " + strconv.Itoa(n))
 	}
 
 	return nil

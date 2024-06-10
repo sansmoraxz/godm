@@ -1,18 +1,16 @@
-package main
+package godm
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
 	"sync"
-	"time"
 )
 
+const maxP = 10
 
-
-func downloadFile(filePath string, url string) error {
+func DownloadFile(filePath string, url string) error {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
@@ -26,9 +24,9 @@ func downloadFile(filePath string, url string) error {
 	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
 	etag := headers.Get("ETag")
 
-	logger.Println("Content-Length: ", length)
-	logger.Println("Accept-Ranges: ", isAcceptRanges)
-	logger.Println("ETag: ", etag)
+	log.Info("Content-Length: ", length)
+	log.Info("Accept-Ranges: ", isAcceptRanges)
+	log.Info("ETag: ", etag)
 
 	// shared client
 	client := &http.Client{
@@ -59,22 +57,6 @@ func downloadFile(filePath string, url string) error {
 	}
 	wg := sync.WaitGroup{}
 
-	// progress bar
-	go func() {
-		fmt.Println("Downloading...")
-		for {
-			fmt.Printf("\r")
-			for _, v := range downBar {
-				if v {
-					fmt.Print("X")
-				} else {
-					fmt.Print("-")
-				}
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
-
 	sem := make(chan bool, maxP)
 	defer close(sem)
 	wg.Add(length/chunkSize + 1)
@@ -82,26 +64,26 @@ func downloadFile(filePath string, url string) error {
 	for c := range toDownloadTracker {
 		sem <- true
 		go func(c Chunk) {
-			logger.Println("Acquired lock for: ", c.start, c.end)
+			log.Trace("Acquired lock for: ", c.start, c.end)
 			defer func() {
 				<-sem
 				wg.Done()
-				logger.Println("Released lock for: ", c.start, c.end)
-				logger.Println("Current sem: ", len(sem))
+				log.Trace("Released lock for: ", c.start, c.end)
+				log.Trace("Current sem: ", len(sem))
 			}()
 			file, err := os.Create(
 				filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
 			)
 			if err != nil {
-				logger.Println("Error: ", err)
+				log.Error("Error: ", err)
 			}
 			defer file.Close()
-			logger.Println("Downloading: ", c.start, c.end)
+			log.Info("Downloading: ", c.start, c.end)
 			err = c.doPartialDownload(client, file)
 			if err != nil {
-				logger.Println("Error: ", err)
+				log.Error("Error: ", err)
 			}
-			logger.Println("Downloaded: ", c.start, c.end)
+			log.Info("Downloaded: ", c.start, c.end)
 			downBar[c.start/chunkSize] = true
 		}(c)
 	}
@@ -113,7 +95,7 @@ func downloadFile(filePath string, url string) error {
 	if err != nil {
 		return err
 	}
-	logger.Println("Reassembling file...")
+	log.Info("Reassembling file...")
 
 	for c := range toDownloadTracker {
 		partFile, err := os.Open(
@@ -142,4 +124,3 @@ func downloadFile(filePath string, url string) error {
 
 	return nil
 }
-

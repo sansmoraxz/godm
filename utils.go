@@ -1,4 +1,4 @@
-package main
+package godm
 
 import "net/http"
 
