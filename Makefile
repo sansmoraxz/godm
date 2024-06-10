@@ -3,4 +3,4 @@ BIN_FILE=godm
 
 
 build:
-	@go build -o bin/ cmd/main.go
+	go build -o bin/ ./cmd/godm/.
