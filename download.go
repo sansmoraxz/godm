@@ -16,11 +16,18 @@ const (
 )
 
 func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
-	// head request to get metadata
-	// Note: the uncompressed payload is considered for Content-Length
-	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
+	// shared client
+	client := &http.Client{
+		// Timeout: time.Second * 10,
+		Transport: &http.Transport{
+			MaxIdleConns:        0,
+			MaxIdleConnsPerHost: maxP * 2,
+		},
+	}
+	defer client.CloseIdleConnections()
 
-	headers, err := getHeaders(url)
+
+	headers, err := getHeaders(client, url)
 	if err != nil {
 		return err
 	}
@@ -32,17 +39,6 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
 	log.Info("Content-Length: ", length)
 	log.Info("Accept-Ranges: ", isAcceptRanges)
 	log.Info("ETag: ", etag)
-
-	// shared client
-	client := &http.Client{
-		// Timeout: time.Second * 10,
-		Transport: &http.Transport{
-			MaxIdleConns:        0,
-			MaxIdleConnsPerHost: maxP * 2,
-		},
-	}
-
-	defer client.CloseIdleConnections()
 
 	toDownloadTracker := make(map[Chunk]bool)
 	downBar := make([]bool, length/chunkSize+1)
