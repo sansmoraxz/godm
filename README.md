@@ -8,3 +8,4 @@ Slight implementation differences:-
 - Non resumable. It's still a work in progress. Resumable downloads will be added in the future.
 - CLI. This is purely CLI app. No GUI as of yet.
 - Using golang context is still a work in progress.
+- If a chunk fails to download, it will retry downloading that chunk again.
