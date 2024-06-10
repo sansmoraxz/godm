@@ -107,7 +107,7 @@ func downloadFile(filePath string, url string) error {
 
 	defer client.CloseIdleConnections()
 
-	chunkSize := 1024 * 1024 // 1MB
+	chunkSize := 512 * 1024 // 1MB
 
 	toDownloadTracker := make(map[Chunk]bool)
 
@@ -141,22 +141,27 @@ func downloadFile(filePath string, url string) error {
 	}()
 
 	sem := make(chan bool, maxP)
+	defer close(sem)
+	wg.Add(length/chunkSize + 1)
 
 	for c := range toDownloadTracker {
 		sem <- true
-		wg.Add(1)
 		go func(c Chunk) {
+			logger.Println("Acquired lock for: ", c.start, c.end)
 			defer func() {
 				<-sem
 				wg.Done()
+				logger.Println("Released lock for: ", c.start, c.end)
+				logger.Println("Current sem: ", len(sem))
 			}()
-			logger.Println("Downloading: ", c.start, c.end)
 			file, err := os.Create(
 				filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
 			)
 			if err != nil {
 				logger.Println("Error: ", err)
 			}
+			defer file.Close()
+			logger.Println("Downloading: ", c.start, c.end)
 			err = doPartialDownload(client, file, url, c)
 			if err != nil {
 				logger.Println("Error: ", err)
@@ -173,12 +178,19 @@ func downloadFile(filePath string, url string) error {
 	if err != nil {
 		return err
 	}
+	logger.Println("Reassembling file...")
 
 	for c := range toDownloadTracker {
 		partFile, err := os.Open(
 			filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
 		)
 		
+		if err != nil {
+			return err
+		}
+
+		// set file pointer to the start of the chunk
+		_, err = file.Seek(int64(c.start), 0)
 		if err != nil {
 			return err
 		}
