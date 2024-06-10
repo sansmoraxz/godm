@@ -9,7 +9,7 @@ import (
 var log *logrus.Logger
 
 func init() {
-	var logFile, err = os.Create(os.TempDir() + "/godm.log")
+	var logFile, err = os.Create(DefaultLogPath())
 	if err != nil {
 		panic(err)
 	}
@@ -21,4 +21,8 @@ func init() {
 		ExitFunc:     os.Exit,
 		ReportCaller: true,
 	}
+}
+
+func DefaultLogPath() string {
+	return os.TempDir() + string(os.PathSeparator) + "godm.log"
 }

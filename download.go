@@ -1,6 +1,7 @@
 package godm
 
 import (
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,11 +12,11 @@ import (
 )
 
 const (
-	maxP = 10
+	maxP      = 10
 	chunkSize = 512 * 1024 // 1MB
 )
 
-func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
+func DownloadFile(filePath string, url string, displayDownloadBar bool, compress bool) error {
 	// shared client
 	client := &http.Client{
 		// Timeout: time.Second * 10,
@@ -26,8 +27,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
 	}
 	defer client.CloseIdleConnections()
 
-
-	headers, err := getHeaders(client, url)
+	headers, err := getHeaders(client, url, compress)
 	if err != nil {
 		return err
 	}
@@ -77,6 +77,10 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
 	defer close(sem)
 	wg.Add(length/chunkSize + 1)
 
+	partFileNameFn := func(c Chunk) string {
+		return filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part"
+	}
+
 	for c := range toDownloadTracker {
 		sem <- true
 		go func(c Chunk) {
@@ -87,56 +91,88 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool) error {
 				log.Trace("Released lock for: ", c.start, c.end)
 				log.Trace("Current sem: ", len(sem))
 			}()
-			file, err := os.Create(
-				filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
-			)
+			file, err := os.Create(partFileNameFn(c))
 			if err != nil {
 				log.Error("Error: ", err)
 			}
 			defer file.Close()
 			log.Info("Downloading: ", c.start, c.end)
-			err = c.doPartialDownload(client, file)
+			err = c.doPartialDownload(client, file, compress)
 			if err != nil {
 				log.Error("Error: ", err)
+			} else {
+				log.Info("Downloaded: ", c.start, c.end)
+				downBar[c.start/chunkSize] = true
 			}
-			log.Info("Downloaded: ", c.start, c.end)
-			downBar[c.start/chunkSize] = true
 		}(c)
 	}
 
 	wg.Wait()
 
 	// reassemble the file
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
+
+	// intermediate gz file if compress is true
+	var file *os.File
+
+	if compress {
+		if file, err = os.Create(filePath + ".gz"); err != nil {
+			return err
+		}
+	} else {
+		if file, err = os.Create(filePath); err != nil {
+			return err
+		}
 	}
 	log.Info("Reassembling file...")
 
-	for c := range toDownloadTracker {
-		partFile, err := os.Open(
-			filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part",
-		)
-		
-		if err != nil {
+	reassembleFile(file, toDownloadTracker, partFileNameFn)
+	file.Close()
+
+	// unzip for compressed file
+
+	if compress {
+		if fin, err := os.Open(filePath + ".gz"); err != nil {
 			return err
+		} else {
+			defer fin.Close()
+			gr, err := gzip.NewReader(fin)
+			if err != nil {
+				return err
+			}
+			fout, err := os.Create(filePath)
+			if err != nil {
+				return err
+			}
+			if _, err = io.Copy(fout, gr); err != nil {
+				return err
+			}
+			gr.Close()
+			fout.Close()
 		}
-
-		// set file pointer to the start of the chunk
-		_, err = file.Seek(int64(c.start), 0)
-		if err != nil {
-			return err
-		}
-
-		_, err = io.Copy(file, partFile)
-		if err != nil {
-			return err
-		}
-
-		partFile.Close()
-		os.Remove(filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part")
-
 	}
 
+	return nil
+}
+
+func reassembleFile(mainFile *os.File, chunks map[Chunk]bool, partFileNameFn func(Chunk) string) error {
+	for c := range chunks {
+		partFile, err := os.Open(partFileNameFn(c))
+
+		if err != nil {
+			return err
+		}
+
+		if _, err = mainFile.Seek(int64(c.start), 0); err != nil {
+			return err
+		}
+
+		if _, err = io.Copy(mainFile, partFile); err != nil {
+			return err
+		}
+		log.Trace("Reassembled: ", c.start, c.end)
+
+		partFile.Close()
+		os.Remove(partFileNameFn(c))
+	}
 	return nil
 }

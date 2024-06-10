@@ -2,7 +2,7 @@ package godm
 
 import "net/http"
 
-func getHeaders(client *http.Client, url string) (http.Header, error) {
+func getHeaders(client *http.Client, url string, compress bool) (http.Header, error) {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 	// Use Accept-Encoding: gzip, deflate, br to get compressed payload size
@@ -10,6 +10,10 @@ func getHeaders(client *http.Client, url string) (http.Header, error) {
 	req, err := http.NewRequest("HEAD", url, nil)
 	if err != nil {
 		return nil, err
+	}
+
+	if compress {
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	}
 	resp, err := client.Do(req)
 	if err != nil {

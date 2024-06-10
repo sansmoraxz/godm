@@ -15,14 +15,17 @@ type Chunk struct {
 	url   string
 }
 
-
-func(chunk *Chunk) doPartialDownload(client *http.Client, file *os.File) error {
+func (chunk *Chunk) doPartialDownload(client *http.Client, file *os.File, compress bool) error {
 
 	// TODO: handle with gzip compression
 
 	req, _ := http.NewRequest("GET", chunk.url, nil)
 
 	req.Header.Set("Range", "bytes="+strconv.Itoa(chunk.start)+"-"+strconv.Itoa(chunk.end))
+
+	if compress {
+		req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	}
 
 	resp, err := client.Do(req)
 
