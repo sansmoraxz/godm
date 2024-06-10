@@ -137,7 +137,6 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 		if fin, err := os.Open(filePath + ".gz"); err != nil {
 			return err
 		} else {
-			defer fin.Close()
 			gr, err := gzip.NewReader(fin)
 			if err != nil {
 				return err
@@ -152,7 +151,12 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 			}
 			gr.Close()
 			fout.Close()
+			fin.Close()
 
+			if err = os.Remove(filePath + ".gz"); err != nil {
+				log.Error("Error: ", err)
+				return err
+			}
 			log.Info("Decompressed file")
 		}
 	}
