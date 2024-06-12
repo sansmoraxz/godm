@@ -1,11 +1,12 @@
 package godm
 
 import (
-	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -35,9 +36,19 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	isAcceptRanges := headers.Get("Accept-Ranges") == "bytes"
 	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
 	etag := headers.Get("ETag")
+	encoding := headers.Get("Content-Encoding")
+
+	if encoding == "" {
+		compress = false
+	} else if slices.Contains(supportedEncodings, encoding) {
+		compress = true
+	} else {
+		return errors.New("Unknown encoding: " + encoding)
+	}
 
 	log.Info("Downloading: ", url)
 	log.Info("Content-Length: ", length)
+	log.Info("Content-Encoding: ", encoding)
 	log.Info("Accept-Ranges: ", isAcceptRanges)
 	log.Info("ETag: ", etag)
 
@@ -117,15 +128,16 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	var reassembledFile *os.File
 	
 	if compress {
-		// intermediate gzip file if compress is true
-		if reassembledFile, err = os.Create(filePath + ".gz"); err != nil {
+		// intermediate archive file if compress is true
+		archivePath := filePath + ".archive"
+		if reassembledFile, err = os.Create(archivePath); err != nil {
 			return err
 		}
 		defer func() {
 			if err = reassembledFile.Close(); err != nil {
 				log.Error("Error: ", err)
 			}
-			if err = os.Remove(filePath + ".gz"); err != nil {
+			if err = os.Remove(archivePath); err != nil {
 				log.Error("Error: ", err)
 			}
 		}()
@@ -137,12 +149,14 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	}
 	log.Info("Reassembling file...")
 
-	reassembleFile(reassembledFile, toDownloadTracker, partFileNameFn)
+	if err = reassembleFile(reassembledFile, toDownloadTracker, partFileNameFn); err != nil {
+		return err
+	}
 
 	log.Info("Reassembled file")
 
 	if compress {
-		if err = decompressFile(reassembledFile, filePath); err != nil {
+		if err = decompressFile(reassembledFile, filePath, encoding); err != nil {
 			return err
 		}
 	}
@@ -183,27 +197,5 @@ func reassembleFile(mainFile *os.File, chunks map[Chunk]bool, partFileNameFn fun
 			return err
 		}
 	}
-	return nil
-}
-
-
-func decompressFile(mainFile *os.File, filePath string) error {
-	mainFile.Seek(0, 0)
-
-	gr, err := gzip.NewReader(mainFile)
-	if err != nil {
-		return err
-	}
-	defer gr.Close()
-	log.Info("Decompressing file...")
-	fout, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer fout.Close()
-	if _, err = io.Copy(fout, gr); err != nil {
-		return err
-	}
-	log.Info("Decompressed file")
 	return nil
 }
