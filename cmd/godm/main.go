@@ -36,6 +36,20 @@ var logCmd = &cobra.Command{
 	Short: "Prints the log file path",
 	Long:  `This command prints the path of the log file.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) > 0 {
+			if args[0] == "view" {
+				if err := godm.ViewLog(); err != nil {
+					println("Error viewing log file:", err)
+				}
+				return
+			} else if args[0] == "clear" {
+				if err := godm.ClearLog(); err != nil {
+					println("Error clearing log file:", err)
+				}
+				return
+			}
+		}
+
 		println("Log file path: ", godm.DefaultLogPath())
 	},
 }

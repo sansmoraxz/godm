@@ -2,6 +2,7 @@ package godm
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ func (f *myFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 
 func init() {
-	var logFile, err = os.Create(DefaultLogPath())
+	var logFile, err = os.OpenFile(DefaultLogPath(), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		panic(err)
 	}
@@ -39,4 +40,36 @@ func init() {
 
 func DefaultLogPath() string {
 	return os.TempDir() + string(os.PathSeparator) + "godm.log"
+}
+
+func ViewLog() error {
+	file, err := os.Open(DefaultLogPath())
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for {
+		var buffer = make([]byte, 1024)
+		n, err := file.Read(buffer)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(buffer[:n]))
+	}
+	return nil
+}
+
+
+func ClearLog() error {
+	// empty the log file content
+	var logFile, err = os.OpenFile(DefaultLogPath(), os.O_RDWR|os.O_TRUNC, 0666)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+	return nil
 }
