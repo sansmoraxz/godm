@@ -17,7 +17,20 @@ const (
 	chunkSize = 512 * 1024 // 1MB
 )
 
-func DownloadFile(filePath string, url string, displayDownloadBar bool, compress bool) error {
+type DownloadConfig struct {
+	DisplayDownloadBar bool
+	Compress           bool
+}
+
+type HeaderInfo struct {
+	IsAcceptRanges bool
+	Length         int
+	ETag           string
+	Encoding       string
+}
+
+func DownloadFile(filePath string, url string, config *DownloadConfig) error {
+
 	// shared client
 	client := &http.Client{
 		// Timeout: time.Second * 10,
@@ -28,39 +41,34 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	}
 	defer client.CloseIdleConnections()
 
-	headers, err := getHeaders(client, url, compress)
+	headerInfo, err := getHeaders(client, url, config)
 	if err != nil {
 		return err
 	}
 
-	isAcceptRanges := headers.Get("Accept-Ranges") == "bytes"
-	length, _ := strconv.Atoi(headers.Get("Content-Length")) // it will be 0 if not present
-	etag := headers.Get("ETag")
-	encoding := headers.Get("Content-Encoding")
-
-	if encoding == "" {
-		compress = false
-	} else if slices.Contains(supportedEncodings, encoding) {
-		compress = true
+	if headerInfo.Encoding == "" {
+		config.Compress = false
+	} else if slices.Contains(supportedEncodings, headerInfo.Encoding) {
+		config.Compress = true
 	} else {
-		return errors.New("Unknown encoding: " + encoding)
+		return errors.New("Unknown encoding: " + headerInfo.Encoding)
 	}
 
 	log.Info("Downloading: ", url)
-	log.Info("Content-Length: ", length)
-	log.Info("Content-Encoding: ", encoding)
-	log.Info("Accept-Ranges: ", isAcceptRanges)
-	log.Info("ETag: ", etag)
+	log.Info("Content-Length: ", headerInfo.Length)
+	log.Info("Content-Encoding: ", headerInfo.Encoding)
+	log.Info("Accept-Ranges: ", headerInfo.IsAcceptRanges)
+	log.Info("ETag: ", headerInfo.ETag)
 
 	toDownloadTracker := make(map[Chunk]bool)
-	downBar := make([]bool, length/chunkSize+1)
+	downBar := make([]bool, headerInfo.Length/chunkSize+1)
 
-	if displayDownloadBar {
+	if config.DisplayDownloadBar {
 		go func() {
 			for {
 				// print download bar
 				fmt.Printf("\r[")
-				for i := 0; i < length/chunkSize+1; i++ {
+				for i := 0; i < headerInfo.Length/chunkSize+1; i++ {
 					if downBar[i] {
 						fmt.Printf("#")
 					} else {
@@ -74,11 +82,11 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 	}
 
 	// download in parallel
-	for i := 0; i < length/chunkSize+1; i++ {
+	for i := 0; i < headerInfo.Length/chunkSize+1; i++ {
 		c := Chunk{
 			start: i * chunkSize,
-			end:   min((i+1)*chunkSize-1, length-1),
-			etag:  etag,
+			end:   min((i+1)*chunkSize-1, headerInfo.Length-1),
+			etag:  headerInfo.ETag,
 			url:   url,
 		}
 		toDownloadTracker[c] = false
@@ -87,7 +95,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 
 	sem := make(chan bool, maxP)
 	defer close(sem)
-	wg.Add(length/chunkSize + 1)
+	wg.Add(headerInfo.Length/chunkSize + 1)
 
 	partFileNameFn := func(c Chunk) string {
 		return filePath + "." + strconv.Itoa(c.start) + "-" + strconv.Itoa(c.end) + ".part"
@@ -110,7 +118,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 			defer file.Close()
 			log.Info("Downloading: ", c.start, c.end)
 			for !downBar[c.start/chunkSize] {
-				err = c.doPartialDownload(client, file, compress)
+				err = c.doPartialDownload(client, file, config.Compress)
 				if err != nil {
 					log.Error("Error for chunk: ", c.start, c.end, err)
 				} else {
@@ -127,7 +135,7 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 
 	var reassembledFile *os.File
 	
-	if compress {
+	if config.Compress {
 		// intermediate archive file if compress is true
 		archivePath := filePath + ".archive"
 		if reassembledFile, err = os.Create(archivePath); err != nil {
@@ -155,8 +163,8 @@ func DownloadFile(filePath string, url string, displayDownloadBar bool, compress
 
 	log.Info("Reassembled file")
 
-	if compress {
-		if err = decompressFile(reassembledFile, filePath, encoding); err != nil {
+	if config.Compress {
+		if err = decompressFile(reassembledFile, filePath, headerInfo.Encoding); err != nil {
 			return err
 		}
 	}

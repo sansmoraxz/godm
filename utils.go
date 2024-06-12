@@ -2,10 +2,11 @@ package godm
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-func getHeaders(client *http.Client, url string, compress bool) (http.Header, error) {
+func getHeaders(client *http.Client, url string, config *DownloadConfig) (*HeaderInfo, error) {
 	// head request to get metadata
 	// Note: the uncompressed payload is considered for Content-Length
 
@@ -14,7 +15,7 @@ func getHeaders(client *http.Client, url string, compress bool) (http.Header, er
 		return nil, err
 	}
 
-	if compress {
+	if config.Compress {
 		req.Header.Set("Accept-Encoding", strings.Join(supportedEncodings, ", "))
 	}
 	resp, err := client.Do(req)
@@ -23,5 +24,15 @@ func getHeaders(client *http.Client, url string, compress bool) (http.Header, er
 	}
 	defer resp.Body.Close()
 
-	return resp.Header, nil
+	l, err := strconv.Atoi(resp.Header.Get("Content-Length"))
+	if  err != nil {
+		return nil, err
+	}
+
+	return &HeaderInfo{
+		IsAcceptRanges: resp.Header.Get("Accept-Ranges") == "bytes",
+		Length:         l,
+		ETag:           resp.Header.Get("ETag"),
+		Encoding:       resp.Header.Get("Content-Encoding"),
+	}, nil
 }

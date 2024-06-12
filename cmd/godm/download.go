@@ -23,7 +23,10 @@ func downloadCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
-			if err := godm.DownloadFile(fileName, largeFileUrl, true, compress); err != nil {
+			if err := godm.DownloadFile(fileName, largeFileUrl, &godm.DownloadConfig{
+				Compress: compress,
+				DisplayDownloadBar: true,
+			}); err != nil {
 				fmt.Printf("\n\nError downloading file: %v\n", err)
 				os.Exit(1)
 			}
