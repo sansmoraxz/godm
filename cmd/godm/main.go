@@ -8,8 +8,12 @@ import (
 )
 
 func rootCmd() *cobra.Command {
+	binPath, err := getCurrentBinaryName()
+	if err != nil {
+		binPath = "godm"
+	}
 	rootCmd := &cobra.Command{
-		Use:   getCurrentBinaryName(),
+		Use:   binPath,
 		Short: "A download manager for large files",
 	}
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 )
@@ -18,12 +19,19 @@ var version = func() string {
     return ""
 }()
 
-func getCurrentBinaryName() string {
+func getCurrentBinaryName() (string, error) {
 	currentBinaryPath, err := os.Executable()
 	if err != nil {
-		println("Error getting current binary path:", err)
-		os.Exit(1)
+		return "", err
 	}
-	return strings.Split(currentBinaryPath, string(os.PathSeparator))[len(strings.Split(currentBinaryPath, string(os.PathSeparator)))-1]
+	currentBinaryPath, err = filepath.EvalSymlinks(currentBinaryPath)
+	if ; err != nil {
+		return "", err
+	}
+	currentBinaryPath = filepath.Base(currentBinaryPath)
+	// whitespace is not allowed in the binary name
+	if strings.Contains(currentBinaryPath, " ") {
+		return "", os.ErrInvalid
+	}
+	return currentBinaryPath, nil
 }
-
