@@ -10,8 +10,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var log *logrus.Logger
-
 type myFormatter struct {
     logrus.TextFormatter
 }
@@ -21,14 +19,35 @@ func (f *myFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 		entry.Time.Format(time.RFC3339), strings.ToUpper(entry.Level.String()), entry.Message)), nil
 }
 
+func DefaultLogPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
 
-func init() {
+	// create the directory if it does not exist
+	dir = dir + string(os.PathSeparator) + "godm"
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		os.Mkdir(dir, os.ModePerm)
+	}
+
+	filePath := dir + string(os.PathSeparator) + "godm.log"
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		os.Create(filePath)
+	}
+
+	return filePath
+}
+
+
+var log *logrus.Logger = func() *logrus.Logger {
 	var logFile, err = os.OpenFile(DefaultLogPath(), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		panic(err)
 	}
 	fmtr := new(myFormatter)
-	log = &logrus.Logger{
+	return &logrus.Logger{
 		Out:          logFile,
 		Formatter:    fmtr,
 		Hooks:        make(logrus.LevelHooks),
@@ -36,11 +55,7 @@ func init() {
 		ExitFunc:     os.Exit,
 		ReportCaller: true,
 	}
-}
-
-func DefaultLogPath() string {
-	return os.TempDir() + string(os.PathSeparator) + "godm.log"
-}
+}()
 
 func ViewLog() error {
 	file, err := os.Open(DefaultLogPath())
